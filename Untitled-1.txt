@@ -1,0 +1,61 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import boto3\n",
+    "\n",
+    "def s3_connection():\n",
+    "    try:\n",
+    "        # s3 클라이언트 생성\n",
+    "        s3 = boto3.client(\n",
+    "            service_name=\"s3\"\n",
+    "            region_name=\"ap-northeast-2\"\n",
+    "            aws_access_key_id=\"AKIAX~\"\n",
+    "            aws_secret_access_key=\"QMRXX~\"\n",
+    "        )\n",
+    "    except Exception as e:\n",
+    "        print(e)\n",
+    "    else:\n",
+    "        print(\"s3 bucket connected!\")\n",
+    "        return s3\n",
+    "\n",
+    "s3 = s3_connection()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import boto3\n",
+    "\n",
+    "s3 = boto3.resource('s3')\n",
+    "s3.meta.client.upload_file('D:\\document\\dailyboxoffice.txt', 'masonetls3', 'dailyboxoffice_py.txt')"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3.11.0 64-bit",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "name": "python",
+   "version": "3.11.0"
+  },
+  "orig_nbformat": 4,
+  "vscode": {
+   "interpreter": {
+    "hash": "f834e99cf629b32b3ad3f12db0c1e5b27620c8e695033839f6a46e240f285d1c"
+   }
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 2
+}

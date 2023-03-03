@@ -1,0 +1,238 @@
+use role sysadmin;
+use warehouse compute_wh;
+create
+or replace database citibike;
+use database citibike;
+use schema public;
+create
+or replace table trips (
+    tripduration integer,
+    starttime timestamp,
+    stoptime timestamp,
+    start_station_id integer,
+    start_station_name string,
+    start_station_latitude float,
+    start_station_longitude float,
+    end_station_id integer,
+    end_station_name string,
+    end_station_latitude float,
+    end_station_longitude float,
+    bikeid integer,
+    membership_type string,
+    usertype string,
+    birth_year integer,
+    gender integer
+);
+/* 생성된 테이블과 설정된 parameter를 확인합니다. */
+show tables like 'tri%' in citibike.public;
+/* alter table 명령으로 parameter를 설정합니다. 예를 들어, Change_tracking을
+true로 설정 하면 테이블에 일어난 모든 change를 활용해서 CDC 작업을 수행할 수
+있습니다. */
+alter table
+    trips
+set
+    change_tracking = true;
+    
+/* 테이블의 각 컬럼 정보를 확인합니다. */
+desc table trips;
+    /* 외부 스테이지를 생성합니다.
+                    AWS S3의 버킷을 그대로 데이터 파일을 저장하는 외부 스테이지로 활용할 수 있습
+                    니다. */
+    create
+    or replace stage citibike_trips url = 's3://snowflake-workshop-lab/citibike-trips-csv/';
+list @citibike_trips;
+    /* 마지막으로 실행시킨 쿼리의 결과를 통해서 전체 사이즈, 평균 파일 크기, 파일 갯
+                    수를 확인합니다. */
+select
+    floor(sum($2) / power(1024, 3), 1) total_compressed_storage_gb,
+    floor(avg($2) / power(1024, 2), 1) avg_file_size_mb,
+    count(*) as num_files
+from
+    table(result_scan(last_query_id()));
+// result_scan 대신 쿼리아이디 넣어도됨 '01aa9fff-3200-abbc-0002-4aca000513b6'
+    /* 데이터 파일에 저장한 데이터의 구조를 반영하는 File Format을 생성합니다. */
+    create
+    or replace file format csv type = 'csv' compression = 'auto' field_delimiter = ',' record_delimiter = '\n' skip_header = 0 field_optionally_enclosed_by = '\042' trim_space = false error_on_column_count_mismatch = false escape = 'none' escape_unenclosed_field = '\134' date_format = 'auto' timestamp_format = 'auto' null_if = ('') comment = 'file format for ingesting data to snowflake';
+    /* 파일 포맷이 생성되었는 지 확인합니다. */
+    show file formats in database citibike;
+    /* 메타데이터를 통해서 각 파일의 경로 및 이름과 레코드 카운트에 대한 정보를 확
+                    인합니다. */
+select
+    metadata$filename,
+    metadata$file_row_number
+from
+    @citibike_trips (file_format => csv);
+    /* citibike_trips 외부 스테이지에 있는 데이터 파일을 csv 파일 포맷에 맞춰서 trips
+                    테이블에 로딩합니다. 
+                    중복적재도 가능하지만 기본적으로 이미 적재된 값은 다시 돌려도 적재되지 않는다. 
+                    < 메타데이터에 저장이 되어있음 > */
+    copy into trips
+from
+    @citibike_trips file_format = csv pattern = '.*csv.*';
+    /* 테이블에 로딩된 데이터를 확인합니다. */
+select
+    *
+from
+    trips
+limit
+    20;
+    /* trips 테이블의 데이터와 메타데이터를 지웁니다. */
+    truncate table trips;
+    /* 명령어를 통해서 직접 가상 웨어하우스의 크기를 large로 변경합니다. */
+    alter warehouse compute_wh
+set
+    warehouse_size = 'large';
+    /* 웨어하우스의 변경 사항을 확인 */
+    show warehouses;
+    /* 데이터를 로딩하기 전에 validation_mode로 데이터 로딩시 발생할 에러를 미리
+                    체크할 수 있습니다. */
+    copy into trips
+from
+    @citibike_trips file_format = csv pattern = '.*csv.*' validation_mode = return_all_errors;
+    /* citibike_trips 외부 스테이지에 있는 데이터 파일을 csv 파일 포맷에 맞춰서 trips
+                    테이블에 로딩합니다. */
+    copy into trips
+from
+    @citibike_trips file_format = csv pattern = '.*csv.*';
+    /* 테이블에 로딩된 데이터를 확인합니다. */
+select
+    *
+from
+    trips sample (50 rows);
+    /* 데이터 파일에서 일부 데이터를 선별적으로 테이블을 만들기 위해서 새로운 테이
+                    블을 생성합니다. 원본 데이터에 없는 tripid라는 새로운 칼럼도 구성합니다. */
+    create
+    or replace table trips_agg (
+        tripid number autoincrement,
+        tripduration integer,
+        start_station_name string,
+        end_station_name string,
+        bikeid integer
+    );
+    /* 테이블의 각 컬럼 정보를 확인합니다. */
+    desc table trips_agg;
+    /* 데이터 파일에서 필요한 컬럼만 추출해서 테이블로 로딩하고 tripid는 자동으로
+                    생성되도록 합니다. */
+    copy into trips_agg(
+        tripduration,
+        start_station_name,
+        end_station_name,
+        bikeid
+    )
+from
+    (
+        select
+            t.$1,
+            t.$5,
+            t.$9,
+            t.$12
+        from
+            @citibike_trips t
+    ) file_format = csv pattern = '.*csv.*';
+select
+    *
+from
+    trips_agg
+limit
+    20;
+    
+    /* 데이터 파일에서 일부 데이터를 전처리해서 로딩하기 위해서 새로운 테이블을 생
+                성합니다. 원본 데이터에 없는 tripid라는 새로운 칼럼도 구성하고 bikeid는 스트링
+                타입으로 저장하고 membership에는 NULL 값이 없도록 저장하고자 합니다. */
+    create
+    or replace table trips_cust (
+        tripid number autoincrement,
+        tripduration integer,
+        start_station_name string,
+        end_station_name string,
+        bikeid string,
+        membership_type string
+    );
+    
+desc table trips_cust;
+    /* 데이터 파일에서 필요한 컬럼만 추출하고 해당하는 function을 통해서 데이터 로
+                    딩 전에 변환 작업을 수행합니다. */
+    copy into trips_cust (
+        tripduration,
+        start_station_name,
+        end_station_name,
+        bikeid,
+        membership_type
+    )
+from
+    (
+        select
+            t.$1,
+            t.$5,
+            t.$9,
+            to_varchar(t.$12),
+            ifnull(t.$13, 'Free Membership')
+        from
+            @citibike_trips t
+    ) file_format = csv pattern = '.*csv.*';
+    
+select
+    *
+from
+    trips_cust
+limit
+    20;
+
+
+
+
+
+
+
+
+/* 외부 스테이지에 있는 경로와 파일 이름을 확인합니다. */
+select metadata$filename from @citibike_trips;
+
+
+/* 앞에서 지정한 file_format에 따라 데이터 파일의 컬럼을 해석해서 외부 테이블에
+대한 메타데이터만 저장합니다. 기본적으로 데이터는 variant 타입의 value 컬럼에
+저장이 되므로 여기서 컬럼을 순서대로 추출해서 형변환을 하는 형태로 외부 테이블
+의 컬럼을 정의합니다. */
+create or replace external table trips_ext
+    (tripduration integer as (value:c1::integer),
+    starttime timestamp as (value:c2::timestamp),
+    stoptime timestamp as (value:c3::timestamp),
+    start_station_id integer as (value:c4::integer),
+    start_station_name string as (value:c5::string),
+    start_station_latitude float as (value:c6::float),
+    start_station_longitude float as (value:c7::float),
+    end_station_id integer as (value:c8::integer),
+    end_station_name string as (value:c9::string),
+    end_station_latitude float as (value:c10::float),
+    end_station_longitude float as (value:c11::float),
+    bikeid integer as (value:c12::integer),
+    membership_type string as (value:c13::string),
+    usertype string as (value:c14::string),
+    birth_year integer as (value:c15::integer),
+    gender integer as (value:c16::integer))
+    location=@citibike_trips/
+    auto_refresh=false
+    file_format=csv;
+
+
+/* 수동으로 refresh를 실행해서 최신 업데이트를 반영합니다. */
+alter external table trips_ext refresh;
+
+
+/* 외부 테이블에 쿼리를 바로 실행해서 결과를 확인합니다. 먼저 value 컬럼에 데이
+터가 어떻게 들어 있는 지 확인합니다. */
+select value from trips_ext limit 10;
+
+
+/* 일반 컬럼들을 확인합니다. */
+select tripduration, start_station_name, end_station_name from trips_ext limit 10;
+
+/* 성능을 향상시키기 위해서 쿼리 결과를 저장하는 Materialized View를 생성합니
+다. */
+create materialized view trips_mat as
+select tripduration, start_station_name end_station_name, bikeid from trips_ext
+where tripduration > 10;
+
+
+/* trips_mat view에 쿼리를 실행해서 결과를 확인합니다. */
+select * from trips_mat limit 100;
