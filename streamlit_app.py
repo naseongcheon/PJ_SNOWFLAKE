@@ -15,7 +15,9 @@ my_fruit_list = pandas.read_csv("https://uni-lab-files.s3.us-west-2.amazonaws.co
 my_fruit_list = my_fruit_list.set_index('Fruit')
 
 #과일을 고를 수 있게 멀티셀렉트 만들어줌.
-streamlit.multiselect("Pick some fruits:", list(my_fruit_list.index))
+fruits_selected = streamlit.multiselect("Pick some fruits:", list(my_fruit_list.index))
+fruits_to_show = my_fruit_list.loc[fruits_selected]
 
-streamlit.dataframe(my_fruit_list)
+#페이지에 테이블을 보여줌.
+streamlit.dataframe(fruits_to_show)
 
